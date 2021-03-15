@@ -443,6 +443,21 @@ public class ContextConfig implements LifecycleListener {
     /**
      * Process the default configuration file, if it exists.
      * @param digester The digester that will be used for XML parsing
+     * <p>
+     *    Context的创建可以有如下几个来源：
+     *     1. 在实例化Server时，解析server.xml文件中的Context元素创建。
+     *     2. 在HostConfig部署Web引用时，解析Web应用（目录或WAR包）跟目录下的META-INF/context.xml文件创建。
+     *        如果不存在该文件，则自动创建一个Context对象，仅设置path、docBase等少数几个属性。
+     *     3. 在Host部署web应用时，解析$CATALINA_BASE/conf/<Engine名称>/<Host名称>下的Context部署描述文件创建。
+     *    除了Context创建时的属性配置，将Tomcat提供的默认值配置也一并添加到Context实例（如果Context没显示的地配置这些属性）。
+     *    这部分工作即有该事件完成。具体过程如下：
+     *     1. 如果Context的override属性为false(即使用默认配置）：
+     *            如果存在conf/context.xml文件（Catalina容器级别默认配置），那么解析该文件，更新当前Context实例属性。
+     *            如果存在conf/<Engine名称>/<Host名称>/context.xml.default文件（Host级默认配置），那么解析该文件，更新当前Context实例属性。
+     *     2. 如果Context的configFile属性不为空，那么解析该文件，更新当前Context实例属性。
+     *    Tomcat中Context属性的优先级为：configFile、conf/<Engine名称>/<Host名称>/context.xml.default、conf/context.xml，即Web应用的优先级最高，
+     *    其次为Host配置，Catalina容器配置优先级最低。
+     * </p>
      */
     protected void contextConfig(Digester digester) {
 
