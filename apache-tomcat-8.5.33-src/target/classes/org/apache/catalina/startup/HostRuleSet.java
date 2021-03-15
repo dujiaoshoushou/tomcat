@@ -79,10 +79,17 @@ public class HostRuleSet extends RuleSetBase {
      *
      * @param digester Digester instance to which the new Rule instances
      *  should be added.
+     *                 <p>
+     *                 解析Host
+     *                 </p>
      */
     @Override
     public void addRuleInstances(Digester digester) {
-
+        /**
+         * 创建Host实例，并将其通过addChild()方法添加到Engine上，catalina默认实现为StandardHost，
+         * 同时还为Host添加了一个生命周期监听器HostConfig，同样，该监听器有Catalina默认添加，而不是由server.xml配置。
+         *
+         */
         digester.addObjectCreate(prefix + "Host",
                                  "org.apache.catalina.core.StandardHost",
                                  "className");
@@ -100,6 +107,9 @@ public class HostRuleSet extends RuleSetBase {
         digester.addCallMethod(prefix + "Host/Alias",
                                "addAlias", 0);
 
+        /**
+         * 为Host添加集群，由此可知，集群配置即可以在Engine级别，也可以在Host级别。
+         */
         //Cluster configuration start
         digester.addObjectCreate(prefix + "Host/Cluster",
                                  null, // MUST be specified in the element
@@ -110,6 +120,10 @@ public class HostRuleSet extends RuleSetBase {
                             "org.apache.catalina.Cluster");
         //Cluster configuration end
 
+        /**
+         * 为Host添加生命周期管理，与HostConfig不同，此部分监听器由server.xml配置。
+         * 默认情况下，catalina未指定host监听器。
+         */
         digester.addObjectCreate(prefix + "Host/Listener",
                                  null, // MUST be specified in the element
                                  "className");
@@ -118,6 +132,10 @@ public class HostRuleSet extends RuleSetBase {
                             "addLifecycleListener",
                             "org.apache.catalina.LifecycleListener");
 
+        /**
+         * 为Host添加安全配置以及拦截器valve，具体拦截器由className指定。
+         * catalian为Host默认拦截器为AccessLogValve
+         */
         digester.addRuleSet(new RealmRuleSet(prefix + "Host/"));
 
         digester.addObjectCreate(prefix + "Host/Valve",

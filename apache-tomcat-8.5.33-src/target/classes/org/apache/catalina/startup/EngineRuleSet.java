@@ -79,10 +79,17 @@ public class EngineRuleSet extends RuleSetBase {
      *
      * @param digester Digester instance to which the new Rule instances
      *  should be added.
+     * <P>
+     *     解析Engine
+     * </P>
      */
     @Override
     public void addRuleInstances(Digester digester) {
-
+        /**
+         * 创建Engine实例，并将其通过setContainer方法添加到Service实例，
+         * catalina默认实现是StandardEngine，同时还为Engine添加了一个生命周期监听器EngineConfig，
+         * 注意EngineConfig是创建时默认添加的，并发由server.xml配置实现。该监听器用于打印Engine启动和停止日志。
+         */
         digester.addObjectCreate(prefix + "Engine",
                                  "org.apache.catalina.core.StandardEngine",
                                  "className");
@@ -94,7 +101,9 @@ public class EngineRuleSet extends RuleSetBase {
         digester.addSetNext(prefix + "Engine",
                             "setContainer",
                             "org.apache.catalina.Engine");
-
+        /**
+         * 为Engine添加集群配置，具体的集群由className指定。
+         */
         //Cluster configuration start
         digester.addObjectCreate(prefix + "Engine/Cluster",
                                  null, // MUST be specified in the element
@@ -104,7 +113,10 @@ public class EngineRuleSet extends RuleSetBase {
                             "setCluster",
                             "org.apache.catalina.Cluster");
         //Cluster configuration end
-
+        /**
+         * 为Engine添加生命周期监听器，与EngineConfig不同，从部分监听器有server.xml配置。
+         * 默认情况下，catalina未指定Engine监听器
+         */
         digester.addObjectCreate(prefix + "Engine/Listener",
                                  null, // MUST be specified in the element
                                  "className");
@@ -113,7 +125,9 @@ public class EngineRuleSet extends RuleSetBase {
                             "addLifecycleListener",
                             "org.apache.catalina.LifecycleListener");
 
-
+        /**
+         * 为Engine添加安全配置和拦截器valve。
+         */
         digester.addRuleSet(new RealmRuleSet(prefix + "Engine/"));
 
         digester.addObjectCreate(prefix + "Engine/Valve",

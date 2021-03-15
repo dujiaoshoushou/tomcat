@@ -101,7 +101,6 @@ public abstract class LifecycleBase implements Lifecycle {
         if (!state.equals(LifecycleState.NEW)) {
             invalidTransition(Lifecycle.BEFORE_INIT_EVENT);
         }
-
         try {
             setStateInternal(LifecycleState.INITIALIZING, null, false);
             initInternal();

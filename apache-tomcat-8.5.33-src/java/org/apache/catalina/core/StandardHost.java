@@ -776,6 +776,7 @@ public class StandardHost extends ContainerBase implements Host {
                     result.add(entry.getValue());
                 }
             }
+
         }
 
         return result.toArray(new String[result.size()]);
@@ -846,6 +847,9 @@ public class StandardHost extends ContainerBase implements Host {
     protected synchronized void startInternal() throws LifecycleException {
 
         // Set error report valve
+        /**
+         * 输出服务器处理异常时的错误页面
+         */
         String errorValve = getErrorReportValveClass();
         if ((errorValve != null) && (!errorValve.equals(""))) {
             try {

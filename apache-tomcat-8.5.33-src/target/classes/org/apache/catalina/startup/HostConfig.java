@@ -315,6 +315,11 @@ public class HostConfig implements LifecycleListener {
         } else if (event.getType().equals(Lifecycle.BEFORE_START_EVENT)) {
             beforeStart();
         } else if (event.getType().equals(Lifecycle.START_EVENT)) {
+            /**
+             * Context描述文件部署
+             * Web目录表部署
+             * War包部署
+             */
             start();
         } else if (event.getType().equals(Lifecycle.STOP_EVENT)) {
             stop();
@@ -429,9 +434,16 @@ public class HostConfig implements LifecycleListener {
     /**
      * Deploy applications for any directories or WAR files that are found
      * in our "application root" directory.
+     * <p>
+     *
+     * </p>
      */
     protected void deployApps() {
-
+        /**
+         * 获取app的路径目录的文件夹引用 /webapps
+         * 获取host的配置文件的路径 /conf/enginename/hostname/
+         * 过滤一下app的路径，用host里的正则表达式来判断文件夹的名字是否符合规定
+         */
         File appBase = host.getAppBaseFile();
         File configBase = host.getConfigBaseFile();
         String[] filteredAppPaths = filterAppPaths(appBase.list());
@@ -518,6 +530,18 @@ public class HostConfig implements LifecycleListener {
      * Deploy XML context descriptors.
      * @param configBase The config base
      * @param files The XML descriptors which should be deployed
+     * <p>
+     *              1. 扫描Host配置文件基础目录，即&CATALINA_BASE/conf/<Engine名称>/<Host名称>,
+     *              对于该目录下的每个配置文件，有线程池完成解析部署。
+     *              主要是通过调用 deployDescriptor
+     *              2. 对于每个文件的部署线程，进行如下操作：
+     *                - 使用Digester解析配置文件，创建Context实例。
+     *                - 更新Context实例的名称、路径（不考虑webappVersion的情况下，使用文件名），因此<Context>元素中配置的path属性无效。
+     *                - 为Context添加ContextConfig生命周期监听器。
+     *                - 通过Host的addChild()方法Context的实例添加到Host。该方法会判断Host是否已经启动。如果是，则直接启动Context。
+     *                - 将Context描述文件、Web应用目录及web.xml等添加到守护资源，以便文件发生变更时（使用资源文件的上次修改时间进行判断）。
+     *                  重新部署或加重Web应用。
+     * </p>
      */
     protected void deployDescriptors(File configBase, String[] files) {
 
@@ -556,6 +580,11 @@ public class HostConfig implements LifecycleListener {
      * Deploy specified context descriptor.
      * @param cn The context name
      * @param contextXml The descriptor
+     * 1. 使用Digester解析配置文件，创建Context实例。
+     * 2. 更新Context实例的名称、路径（不考虑webappVersion的情况下，使用文件名），因此<Context>元素中配置的path属性无效。
+     * 3. 为Context添加ContextConfig生命周期监听器。
+     * 4. 通过Host的addChild()方法Context的实例添加到Host。该方法会判断Host是否已经启动。如果是，则直接启动Context。
+     * 5. 将Context描述文件、Web应用目录及web.xml等添加到守护资源，以便文件发生变更时（使用资源文件的上次修改时间进行判断）,重新部署或加重Web应用。
      */
     @SuppressWarnings("null") // context is not null
     protected void deployDescriptor(ContextName cn, File contextXml) {
@@ -711,6 +740,24 @@ public class HostConfig implements LifecycleListener {
      * Deploy WAR files.
      * @param appBase The base path for applications
      * @param files The WARs to deploy
+     * <p>
+     *  1. 对于Host的appBase目录（默认为$CATALINA_BASE/webapps)下所有符合条件的WAR包（不符合deployIgnore的过滤规则，
+     *     文件名不为META-INF和WEB-INF，以war作为扩展名的文件），由线程池完成部署。
+     *  2. 对于每个WAR包进行如下操作：
+     *     1. 如果Host的deployXML属性为true，且在WAR包同名目录（去除扩展名）下存在META-INF/context.xml,同时Context的copyXML属性为false，
+     *        则使用该描述文件创建Context实例（用于WAR包解压目录位于部署目录的情况）。
+     *        如果Host的deployXML属性为true，但是在WAR包压缩文件下存在META-INF/context.xml,则构造FailedContext实例
+     *       （Catalina的空模式，用于表示Context部署失败）。
+     *        其他情况下，根据Host的contextClass属性指定的类型创建Context对象。如不指定，则为StandardContext。此时所有的Context属性为默认配置，
+     *        除name、path、webappVersion、docBase会根据WAR包的路径及名称进行设置外。
+     *     2. 如果deployXML属性为true，且META-INF/context.xml存在于WAR包中，同时Context的copyXML属性为true，则将context.xml文件复制到
+     *        $CATALINE_BASE/conf/<Engine名称>/<Host名称>目录下，文件名称同WAR包名称（去除扩展名）。
+     *     3. 为Context实例添加ContextConfig生命周期监听器。
+     *     4. 通过Host的addChild()方法将Context实例添加Host。该方法会判断Host是否已启动，如果是，则直接启动Context
+     *     5. 将Context描述文件、WAR包及web.xml等添加到守护资源，以便文件发生变更时重新部署或者加载Web应用。
+     *
+     *
+     * </p>
      */
     protected void deployWARs(File appBase, String[] files) {
 
@@ -823,6 +870,17 @@ public class HostConfig implements LifecycleListener {
      * Deploy packed WAR.
      * @param cn The context name
      * @param war The WAR file
+     * 1. 如果Host的deployXML属性为true，且在WAR包同名目录（去除扩展名）下存在META-INF/context.xml,同时Context的copyXML属性为false，
+     * 则使用该描述文件创建Context实例（用于WAR包解压目录位于部署目录的情况）。
+     * 如果Host的deployXML属性为true，但是在WAR包压缩文件下存在META-INF/context.xml,则构造FailedContext实例
+     * Catalina的空模式，用于表示Context部署失败）。
+     * 其他情况下，根据Host的contextClass属性指定的类型创建Context对象。如不指定，则为StandardContext。此时所有的Context属性为默认配置，
+     * 除name、path、webappVersion、docBase会根据WAR包的路径及名称进行设置外。
+     * 2. 如果deployXML属性为true，且META-INF/context.xml存在于WAR包中，同时Context的copyXML属性为true，则将context.xml文件复制到
+     * $CATALINE_BASE/conf/<Engine名称>/<Host名称>目录下，文件名称同WAR包名称（去除扩展名）。
+     * 3. 为Context实例添加ContextConfig生命周期监听器。
+     * 4. 通过Host的addChild()方法将Context实例添加Host。该方法会判断Host是否已启动，如果是，则直接启动Context
+     * 5. 将Context描述文件、WAR包及web.xml等添加到守护资源，以便文件发生变更时重新部署或者加载Web应用。
      */
     protected void deployWAR(ContextName cn, File war) {
 
@@ -1027,6 +1085,21 @@ public class HostConfig implements LifecycleListener {
      * Deploy exploded webapps.
      * @param appBase The base path for applications
      * @param files The exploded webapps that should be deployed
+     *
+     * 1. 对于Host的appBase目录（默认为$CATALINA_BASE/webapps)下符合条件的目标（不符合deployIgnore的过滤规则、目录名不为META-INF和WEB-INF），
+     *              由线程池完成部署。
+     * 2. 对于每个目录进行如下操作：
+     *    1. 如果Host的deployXml属性为true，（即通过Context描述文件部署），并且存在META-INF/context.xml文件，则使用Digester解析
+     *       context.xml文件创建Context对象。如果Context的copyXML属性为true，则将描述文件复制到&CATALINA_BASE/conf/<Engine名称>/<Host名称>
+     *       目录下，文件名与Web应用目录相同。如果deployXML属性值为false，但是存在META-INF/context.xml文件，则构造FailedContext实例
+     *       （Catalina的空模式，用于表示Context部署失败）。其他情况下，根据Host的contextClass属性指定的类型创建Context对象。
+     *       如不指定，则为StandardContext。此时，所有的Context属性均采用默认配置，除name、path、webappVersion、
+     *       docBase会根据Web应用目录的路径及名称进行设置外。
+     *    2. 为Context实例添加ContextConfig生命周期监听器
+     *    3. 通过Host的addChild()方法将Context添加到Host。该方法会判断Host是否已启动，如果是则直接启动Context。
+     *    4. 将Context描述文件、web应用目录及web.xml等添加到守护资源，以便文件发生变更时重新部署或者加重web应用。守护文件因deployXML和copyXml的配置稍微不同。
+     *
+     *
      */
     protected void deployDirectories(File appBase, String[] files) {
 
@@ -1068,6 +1141,15 @@ public class HostConfig implements LifecycleListener {
      * Deploy exploded webapp.
      * @param cn The context name
      * @param dir The path to the root folder of the weapp
+     * 1. 如果Host的deployXml属性为true，（即通过Context描述文件部署），并且存在META-INF/context.xml文件，则使用Digester解析
+     * context.xml文件创建Context对象。如果Context的copyXML属性为true，则将描述文件复制到&CATALINA_BASE/conf/<Engine名称>/<Host名称>
+     * 目录下，文件名与Web应用目录相同。
+     * 如果deployXML属性值为false，但是存在META-INF/context.xml文件，则构造FailedContext实例（Catalina的空模式，用于表示Context部署失败）。
+     * 其他情况下，根据Host的contextClass属性指定的类型创建Context对象。如不指定，则为StandardContext。此时，所有的Context属性均采用默认配置，
+     * 除name、path、webappVersion、docBase会根据Web应用目录的路径及名称进行设置外。
+     * 2. 为Context实例添加ContextConfig生命周期监听器
+     * 3. 通过Host的addChild()方法将Context添加到Host。该方法会判断Host是否已启动，如果是则直接启动Context。
+     * 4. 将Context描述文件、web应用目录及web.xml等添加到守护资源，以便文件发生变更时重新部署或者加重web应用。守护文件因deployXML和copyXml的配置稍微不同。
      */
     protected void deployDirectory(ContextName cn, File dir) {
 
@@ -1557,6 +1639,7 @@ public class HostConfig implements LifecycleListener {
 
     /**
      * Process a "start" event for this Host.
+     * 当监听的host启动的时候会执行这个方法，其实主要是context的部署
      */
     public void start() {
 
@@ -1564,6 +1647,11 @@ public class HostConfig implements LifecycleListener {
             log.debug(sm.getString("hostConfig.start"));
 
         try {
+            /**
+             * 获取host的jmx上面注册的名字
+             * 根据host的名字生成当前对象的名字
+             * 在jmx上注册当前对象
+             */
             ObjectName hostON = host.getObjectName();
             oname = new ObjectName
                 (hostON.getDomain() + ":type=Deployer,host=" + host.getName());
@@ -1579,7 +1667,9 @@ public class HostConfig implements LifecycleListener {
             host.setDeployOnStartup(false);
             host.setAutoDeploy(false);
         }
-
+        /**
+         * 开始部署应用
+         */
         if (host.getDeployOnStartup())
             deployApps();
 

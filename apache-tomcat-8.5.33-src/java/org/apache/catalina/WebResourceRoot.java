@@ -108,6 +108,13 @@ public interface WebResourceRoot extends Lifecycle {
      *              of the web application. It must start with '/'.
      *
      * @return  The objects that represents the resource at the given path
+     * <p>
+     *     pre 资源
+     *     Context.xml <PreResource></PreResource>
+     *     main 资源 WEB-INF/lib classes
+     *     Jar 资源 <JarResource></JarResource>
+     *     post 资源 <PostResource></PostResource>
+     * </p>
      */
     WebResource[] getResources(String path);
 

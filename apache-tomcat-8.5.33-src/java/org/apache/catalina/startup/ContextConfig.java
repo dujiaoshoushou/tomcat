@@ -115,6 +115,9 @@ import org.xml.sax.SAXParseException;
  * of that Context, and the associated defined servlets.
  *
  * @author Craig R. McClanahan
+ * <p>
+ *     Context的生命周期监听器。
+ * </p>
  */
 public class ContextConfig implements LifecycleListener {
 
@@ -762,7 +765,10 @@ public class ContextConfig implements LifecycleListener {
                     Boolean.valueOf(context.getXmlValidation()),
                     Boolean.valueOf(context.getXmlNamespaceAware())));
         }
-
+        /**
+         * 这里是重点，这里会解析所有实现了ServletContainerInitializer接口的类，
+         * 并把它们放到一个map当中。
+         */
         webConfig();
         context.addServletContainerInitializer(new JasperInitializer(),null);
 
@@ -1605,6 +1611,12 @@ public class ContextConfig implements LifecycleListener {
 
     /**
      * Scan JARs for ServletContainerInitializer implementations.
+     * <p>
+     *     通过扫描配置文件，扫描实现了ServletContainerInitializer接口的servlet类
+     *     这里很重要，因为springboot、springmvc在内嵌tomcat的时候，会通过SpringServletContainerInitializer（这个
+     *     实现了ServletContainerInitializer）来调用实现了WebApplicationInitializer接口的类的onStartup方法，从而启动了
+     *     jar包和war包。
+     * </p>
      */
     protected void processServletContainerInitializers() {
 

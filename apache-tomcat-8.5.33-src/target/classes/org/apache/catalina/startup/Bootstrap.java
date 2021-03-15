@@ -140,7 +140,9 @@ public final class Bootstrap {
 
     // -------------------------------------------------------- Private Methods
 
-
+    /**
+     * 创建TomCat类加载器,jvm双亲委派机制
+     */
     private void initClassLoaders() {
         try {
             commonLoader = createClassLoader("common", null);

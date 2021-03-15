@@ -5000,6 +5000,16 @@ public class StandardContext extends ContainerBase
      *
      * @exception LifecycleException if this component detects a fatal error
      *  that prevents this component from being used
+     *  1. 发布正在启动的JMX通知，这样可以通过添加NotificationListener来监听Web应用的启动。
+     *  2. 启动当前Context维护的JNDI资源。
+     *  3. 初始化当前Context使用的WebResourceRoot并启动。WE吧ResourceRoot维护了Web应用所有的资源集合（Class 文件，Jar包以及其他资源文件），
+     *     主要用于类加载和按照路径查找资源文件。
+     *  4. 创建Web应用类加载器（WebappLoader）。WebappLoader继承自LifecycleMBeanBase，在其启动时创建Web应用类加载器（WebappClassLoader).
+     *     此外，该类还提供了background-Process，用于Context后台处理。当检测到Web应用的类文件、Jar包发生变更时，重新加载Context。
+     *  5. 如果没有设置Cookie处理器，则创建默认的Rfc6265CookieProcessor。
+     *  6. 设置字符集映射（CharsetMapper），该映射主要用于根据Locale获取字符集编码
+     *  7. 初始化临时目录，默认为$CATALINA_BASE/work/<Engine名称>/<Host名称>/<Context名称>
+     *
      */
     @Override
     protected synchronized void startInternal() throws LifecycleException {
@@ -5042,6 +5052,9 @@ public class StandardContext extends ContainerBase
             resourcesStart();
         }
 
+        /**
+         * 主要加载当前的webapp
+         */
         if (getLoader() == null) {
             WebappLoader webappLoader = new WebappLoader(getParentClassLoader());
             webappLoader.setDelegate(getDelegate());
@@ -5071,6 +5084,9 @@ public class StandardContext extends ContainerBase
             ok = false;
         }
 
+        /**
+         * 读取环境变量
+         */
         // Reading the "catalina.useNaming" environment variable
         String useNamingProperty = System.getProperty("catalina.useNaming");
         if ((useNamingProperty != null)
@@ -5150,6 +5166,9 @@ public class StandardContext extends ContainerBase
                     context.setAttribute(Globals.CREDENTIAL_HANDLER, safeHandler);
                 }
 
+                /**
+                 * 生命周期监听事件
+                 */
                 // Notify our interested LifecycleListeners
                 fireLifecycleEvent(Lifecycle.CONFIGURE_START_EVENT, null);
 
