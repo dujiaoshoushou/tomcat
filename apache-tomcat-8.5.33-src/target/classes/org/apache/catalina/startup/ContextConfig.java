@@ -115,6 +115,9 @@ import org.xml.sax.SAXParseException;
  * of that Context, and the associated defined servlets.
  *
  * @author Craig R. McClanahan
+ * <p>
+ *     Context的生命周期监听器。
+ * </p>
  */
 public class ContextConfig implements LifecycleListener {
 
@@ -440,6 +443,21 @@ public class ContextConfig implements LifecycleListener {
     /**
      * Process the default configuration file, if it exists.
      * @param digester The digester that will be used for XML parsing
+     * <p>
+     *    Context的创建可以有如下几个来源：
+     *     1. 在实例化Server时，解析server.xml文件中的Context元素创建。
+     *     2. 在HostConfig部署Web引用时，解析Web应用（目录或WAR包）跟目录下的META-INF/context.xml文件创建。
+     *        如果不存在该文件，则自动创建一个Context对象，仅设置path、docBase等少数几个属性。
+     *     3. 在Host部署web应用时，解析$CATALINA_BASE/conf/<Engine名称>/<Host名称>下的Context部署描述文件创建。
+     *    除了Context创建时的属性配置，将Tomcat提供的默认值配置也一并添加到Context实例（如果Context没显示的地配置这些属性）。
+     *    这部分工作即有该事件完成。具体过程如下：
+     *     1. 如果Context的override属性为false(即使用默认配置）：
+     *            如果存在conf/context.xml文件（Catalina容器级别默认配置），那么解析该文件，更新当前Context实例属性。
+     *            如果存在conf/<Engine名称>/<Host名称>/context.xml.default文件（Host级默认配置），那么解析该文件，更新当前Context实例属性。
+     *     2. 如果Context的configFile属性不为空，那么解析该文件，更新当前Context实例属性。
+     *    Tomcat中Context属性的优先级为：configFile、conf/<Engine名称>/<Host名称>/context.xml.default、conf/context.xml，即Web应用的优先级最高，
+     *    其次为Host配置，Catalina容器配置优先级最低。
+     * </p>
      */
     protected void contextConfig(Digester digester) {
 
@@ -561,9 +579,23 @@ public class ContextConfig implements LifecycleListener {
     /**
      * Adjust docBase.
      * @throws IOException cannot access the context base path
+     * <p>
+     *     1. 根据Host的appBase以及Context的docBase计算docBase的绝对路径。
+     *     2. 如果docBase为一个WAR文件，且需要解压部署：
+     *        - 解压WAR文件；
+     *        - 将Context的docBase更新为解压后的路径（基于appBase的相对路径)
+     *        如果不需要解压部署，只检测WAR包，不更新docBase。
+     *     3. 如果docBase为一个有效目录，而且存在与该目录同名的WAR包，同时需要解压部署，则重新解压WAR包。
+     *     4.如果docBase为一个不存在的目录，但是存在与该目录同步的WAR包，同时需要解压部署：
+     *        - 解压WAR包文件；
+     *        - 将Context的docBase更新为解压后的路径（基于appBase的相对路径）。
+     *       如果不需要解压部署，只检测WAR包，docBase为WAR包路径。
+     * </p>
      */
     protected void fixDocBase() throws IOException {
-
+        /**
+         * 根据Host的appBase以及Context的docBase计算docBase的绝对路径。
+         */
         Host host = (Host) context.getParent();
         File appBase = host.getAppBaseFile();
 
@@ -600,6 +632,12 @@ public class ContextConfig implements LifecycleListener {
 
         boolean docBaseInAppBase = docBase.startsWith(appBase.getPath() + File.separatorChar);
 
+        /**
+         *  2. 如果docBase为一个WAR文件，且需要解压部署：
+         *      - 解压WAR文件；
+         *      - 将Context的docBase更新为解压后的路径（基于appBase的相对路径)
+         *     如果不需要解压部署，只检测WAR包，不更新docBase。
+         */
         if (docBase.toLowerCase(Locale.ENGLISH).endsWith(".war") && !file.isDirectory()) {
             URL war = UriUtil.buildJarUrl(new File(docBase));
             if (unpackWARs) {
@@ -619,6 +657,9 @@ public class ContextConfig implements LifecycleListener {
             if (warFile.exists() && docBaseInAppBase) {
                 war = UriUtil.buildJarUrl(warFile);
             }
+            /**
+             * 3. 如果docBase为一个有效目录，而且存在与该目录同名的WAR包，同时需要解压部署，则重新解压WAR包
+             */
             if (docDir.exists()) {
                 if (war != null && unpackWARs) {
                     // Check if WAR needs to be re-expanded (e.g. if it has
@@ -628,6 +669,12 @@ public class ContextConfig implements LifecycleListener {
                     ExpandWar.expand(host, war, pathName);
                 }
             } else {
+                /**
+                 * 如果docBase为一个不存在的目录，但是存在与该目录同步的WAR包，同时需要解压部署：
+                 *   - 解压WAR包文件；
+                 *   - 将Context的docBase更新为解压后的路径（基于appBase的相对路径）。
+                 * 如果不需要解压部署，只检测WAR包，docBase为WAR包路径。
+                 */
                 if (war != null) {
                     if (unpackWARs) {
                         docBase = ExpandWar.expand(host, war, pathName);
@@ -665,7 +712,9 @@ public class ContextConfig implements LifecycleListener {
 
         if ((context instanceof StandardContext)
             && ((StandardContext) context).getAntiResourceLocking()) {
-
+            /**
+             * 根据Host的appBase以及Context的docBase计算docBase的绝对路径
+             */
             Host host = (Host) context.getParent();
             String docBase = context.getDocBase();
             if (docBase == null) {
@@ -684,7 +733,11 @@ public class ContextConfig implements LifecycleListener {
             }
             ContextName cn = new ContextName(path, context.getWebappVersion());
             docBase = cn.getBaseName();
-
+            /**
+             * 计算临时文件夹中的Web应用跟目录或WAR包名。
+             *  - Web目录：${Context生命周期内的部署次数}-${目录名}
+             *  - WAR包：${Context生命周期内的部署次数}-${WAR包名}
+             */
             if (originalDocBase.toLowerCase(Locale.ENGLISH).endsWith(".war")) {
                 antiLockingDocBase = new File(
                         System.getProperty("java.io.tmpdir"),
@@ -704,6 +757,10 @@ public class ContextConfig implements LifecycleListener {
 
             // Cleanup just in case an old deployment is lying around
             ExpandWar.delete(antiLockingDocBase);
+            /**
+             * 复制Web目录或者WAR包到临时目录
+             * 将Context的docBase更新为临时目录下的Web应用目录或者WAR包路径。
+             */
             if (ExpandWar.copy(docBaseFile, antiLockingDocBase)) {
                 context.setDocBase(antiLockingDocBase.getPath());
             }
@@ -732,22 +789,46 @@ public class ContextConfig implements LifecycleListener {
 
     /**
      * Process a "before start" event for this Context.
+     * <p>
+     *     berfore start事件，用于更新Context的docBase属性和解决Web目录锁的问题。
+     *
+     * </p>
      */
     protected synchronized void beforeStart() {
 
         try {
+            /**
+             * 更新Context的docBase属性主要是为了满足WAR部署的情况。当WEB应用为一个WAR压缩包且需要
+             * 解压部署（Host的unpackWAR为true，且Context的unpackWAR为true）时，docBase属性指向
+             * 的是解压后的文件夹目录，而非WAR包的路径。
+             */
             fixDocBase();
         } catch (IOException e) {
             log.error(sm.getString(
                     "contextConfig.fixDocBase", context.getName()), e);
         }
-
+        /**
+         * 当Context的antiResourceLocking属性为true时，Tomcat会将当前的Web应用目录复制到临时文件夹下，以避免对原目录的资源加锁。
+         */
         antiLocking();
     }
 
 
     /**
      * Process a "contextConfig" event for this Context.
+     * <p>
+     *     ContextCofig通过CONFIGRE_START_EVENT事件，解析web.xml,
+     *     创建Wrapper（Servlet）、Filter、ServletContextListener等一系列WEB
+     *     容器相关的对象，完成对Web容器的初始化的。
+     *     主要工作内容如下：
+     *     1. 根据配置创建Wrapper(Serlvet)、Filter、ServletContextListener等，完成Web容器的初始化。
+     *        除了解析Web应用目录下的web.xml外，还包括Tomcat的默认配置、web-fragment.xml、ServletContainerInitializer，
+     *        以及相关XML文件的排序和合并。
+     *     2. 如果StandardContext的ignoreAnnotations位false，则解析应用程序注解配置，添加相关的JNDI资源引用。
+     *     3. 基于解析完成的Web容器，检测Web应用部署描述中的安全角色名称，当发现使用了未定义的角色时，
+     *        提示警告同时将未定义的角色添加到Context安全角色列表中。
+     *     4. 当Context需要进行安全认证但是没有指定具体的Authenticator时，根据服务器配置自动创建默认实例。
+     * </p>
      */
     protected synchronized void configureStart() {
         // Called from StandardContext.start()
@@ -762,10 +843,31 @@ public class ContextConfig implements LifecycleListener {
                     Boolean.valueOf(context.getXmlValidation()),
                     Boolean.valueOf(context.getXmlNamespaceAware())));
         }
-
+        /**
+         * 这里是重点，这里会解析所有实现了ServletContainerInitializer接口的类，
+         * 并把它们放到一个map当中。
+         * web容器初始化（重点）
+         */
         webConfig();
         context.addServletContainerInitializer(new JasperInitializer(),null);
-
+        /**
+         * 应用程序注解配置。
+         * 当StandardContext的getIgnoreAnnotations位false时，Tomcat支持读取如下接口的Java命令服务配置，
+         * 添加相关的JNDI资源引用。
+         * 支持读取的接口如下：
+         *  - web应用程序监听器：
+         *    -- javax.servlet.ServletContextAttributeListener
+         *    -- javax.servlet.ServletRequestListener
+         *    -- javax.servlet.ServletRequestAttributeListener
+         *    -- javax.servlet.http.HttpSessionAttributeListener
+         *    -- javax.servlet.http.HttpSessionListener
+         *    -- javax.servlet.ServletContextListener
+         *  - java.servlet.Filter
+         *  - javax.servlet.Servlet
+         * 支持读取的注解包括类注解、属性注解、方法注解如下：
+         *  - 类：javax.annotation.Resource,javax.annotation.Resources
+         *  - 属性和方法：javax.annotation.Resource
+         */
         if (!context.getIgnoreAnnotations()) {
             applicationAnnotationsConfig();
         }
@@ -1066,6 +1168,16 @@ public class ContextConfig implements LifecycleListener {
      * where there is duplicate configuration, the most specific level wins. ie
      * an application's web.xml takes precedence over the host level or global
      * web.xml file.
+     * <P>
+     *     Web容器初始化。
+     *     根据Servlet规范，web应用部署描述可来源于WEB-INF/web.xml、Web应用JAR包中的
+     *     META-INF/web-fragment.xml和META-INF/service/javax.servlet.ServletContainerInitializer。
+     *     其中META-INF/service/javax.servlet.ServletContainerInitializer文件中配置了所属JAR中该接口的实现类，
+     *     用于动态注册Servlet，这是Servlet规范基于SPI机制的可编程实现。
+     *     除了Servlet规范中提到的部署描述方式，Tomcat还支持默认配置，以简化Web应用的配置工作。这默认配置包括容器级别
+     *     (conf/web.xml)和Host级别(conf/<Engine名称>/<Host名称>/web.xml.default)。Tomcat解析时确保Web应用中的
+     *     配置级别优先级最高，其次为Host级，最后为容器级。
+     * </P>
      */
     protected void webConfig() {
         /*
@@ -1093,6 +1205,10 @@ public class ContextConfig implements LifecycleListener {
          *   those in JARs excluded from an absolute ordering) need to be
          *   scanned to check if they match.
          */
+        /**
+         * 解析默认配置，生成WebXml对象（Tomcat使用该对象表示web.xml的解析结果）。先解析容器级配置，然后在解析Host配置。
+         * 这样对于同名配置，Host级将覆盖容器级。为了提升性能，ContextConfig对默认的web.xml进行了缓存，以避免重复解析。
+         */
         WebXmlParser webXmlParser = new WebXmlParser(context.getXmlNamespaceAware(),
                 context.getXmlValidation(), context.getXmlBlockExternal());
 
@@ -1102,6 +1218,10 @@ public class ContextConfig implements LifecycleListener {
         WebXml webXml = createWebXml();
 
         // Parse context level web.xml
+        /**
+         * 解析Web应用的web.xml文件。如果StandardContext的altDDName不为空，则将该属性指向的文件作为web.xml,否则使用默认路径，
+         * 即WEB-INF/web.xml。解析结果同样为WebXml对象（此时创建的对象为主WebXml，其他解析结果均需要合并到该对象上）。
+         */
         InputSource contextWebXml = getContextWebXmlSource();
         if (!webXmlParser.parseWebXml(contextWebXml, webXml, false)) {
             ok = false;
@@ -1115,18 +1235,44 @@ public class ContextConfig implements LifecycleListener {
         // provided by the container. If any of the application JARs have a
         // web-fragment.xml it will be parsed at this point. web-fragment.xml
         // files are ignored for container provided JARs.
+        /**
+         * 扫描Web应用所有JAR包，如果包含META-INF/web-fragment.xml，则解析该文件并创建WebXml对象。
+         */
         Map<String,WebXml> fragments = processJarsForWebFragments(webXml, webXmlParser);
 
         // Step 2. Order the fragments.
+        /**
+         * 将web-fragment.xml创建的WebXml对象按照Serlvet规范进行排序。同时将排序结果对应的JAR文件名列表设置到
+         * ServletContext属性中，属性名为javax.servlet.context.orderLibs。该排序非常重要，因为决定了Filter等执行顺序。
+         */
         Set<WebXml> orderedFragments = null;
         orderedFragments =
                 WebXml.orderWebFragments(webXml, fragments, sContext);
 
         // Step 3. Look for ServletContainerInitializer implementations
         if (ok) {
+            /**
+             * 查找ServletContainerInitializer实现，并创建实例，查找范围分为两部分。
+             *  - Web应用下的包：如果javax.servlet.context.orderedLibs不为空，仅搜索该属性包含的包，否则搜索WEB-INf/lib下所有包。
+             *  - 容器包：搜索所有包
+             * Tomcat返回查找结果列表时，确保Web应用的顺序存在容器之后，因此容器中的实现将先加载。
+             * 根据ServletContainerInitializer查询结果以及javax.serlvet.annotation.HandlesTyes注解配置，初始化typeInitializerMap
+             * 和initializrClassMap两个映射（主要用于后续的注解检测），前者表示类对应的ServletContainerInitializer集合，而后者表示每个
+             * ServletContainerInitializer对应的类的集合，具体类有javax.serlvet.annotation.HandlesTyes注解指定。
+             */
             processServletContainerInitializers();
         }
-
+        /**
+         * 当"主WebXml"的metadataComplete为false或者typeInitializerMap不为空时。
+         *  - 处理WEB-INF/classes下的注解，对于该目录下的每个类应做如下处理。
+         *    -- 检测javax.servlet.annotation.HandlesTypes注解。
+         *    -- 当WebXml的metadataComplete为false，查找javax.servlet.annotation.WebServlet、javax.servlet.annotation.WebFilter、
+         *       javax.servlet.annotation.WebListener注解配置，将其合并到"主WebXml"。
+         *  - 处理JAR包内的注解，只处理包含web-fragment.xml的JAR，对应JAR包中的每个类做如下处理:
+         *    -- 检测javax.servlet.annotation.HandlesTypes注解。
+         *    -- 当 "主WebXml" 和 "片段WebXml" 的metadataComplete为false，查找javax.servlet.annotation.WebServlet、javax.servlet.annotation.WebFilter、
+         *       javax.servlet.annotation.WebListener注解配置，将其合并到"主WebXml"。
+         */
         if  (!webXml.isMetadataComplete() || typeInitializerMap.size() > 0) {
             // Step 4. Process /WEB-INF/classes for annotations and
             // @HandlesTypes matches
@@ -1159,7 +1305,9 @@ public class ContextConfig implements LifecycleListener {
             // Cache, if used, is no longer required so clear it
             javaClassCache.clear();
         }
-
+        /**
+         * 如果 "主WebXml" 的metadataComplete为false，将所有的 "片段WebXml" 按照排序顺序合并到 "主WebXml"
+         */
         if (!webXml.isMetadataComplete()) {
             // Step 6. Merge web-fragment.xml files into the main web.xml
             // file.
@@ -1170,18 +1318,35 @@ public class ContextConfig implements LifecycleListener {
             // Step 7. Apply global defaults
             // Have to merge defaults before JSP conversion since defaults
             // provide JSP servlet definition.
+            /**
+             * 将 "默认的WebXml" 合并到 "主WebXml"
+             */
             webXml.merge(defaults);
 
             // Step 8. Convert explicitly mentioned jsps to servlets
             if (ok) {
+                /**
+                 * 配置JspServlet。对应当前web应用中JspFile属性不为空的Servlet，将其ServletClass设为org.apache.jasper.servlet.JspServlet
+                 * （Tomcat提供的JSP引擎），将JspFile设置为Servlet的初始化参数，同时将名称为"jsp"的Servlet(见conf/web.xml)的初始化参数也负责到该
+                 * Servlet中。
+                 */
                 convertJsps(webXml);
             }
 
             // Step 9. Apply merged web.xml to Context
             if (ok) {
+                /**
+                 * 使用 "主WebXml" 配置当的StandardContext，包括Servlet、Filter、Listener等Servlet规范中支持的组件。
+                 * 对于SerlvetContext层级的对象，直接由StandardContext维护，对于Servlet，则创建StandardWrapper子对象，
+                 * 并添加到StandardContext实例。
+                 * 将合并后的webXml保存到ServletContext属性中，便于后续处理复用，属性名为org.apache.tomcat.util.scan.MergedWebXml.
+                 */
                 configureContext(webXml);
             }
         } else {
+            /**
+             * 将 "默认的WebXml" 合并到 "主WebXml"
+             */
             webXml.merge(defaults);
             convertJsps(webXml);
             configureContext(webXml);
@@ -1193,6 +1358,9 @@ public class ContextConfig implements LifecycleListener {
 
         // Always need to look for static resources
         // Step 10. Look for static resources packaged in JARs
+        /**
+         * 查找JAR包"META-INF/resources/"下的静态资源，并添加到StandardContext。
+         */
         if (ok) {
             // Spec does not define an order.
             // Use ordered JARs followed by remaining JARs
@@ -1212,6 +1380,9 @@ public class ContextConfig implements LifecycleListener {
 
         // Step 11. Apply the ServletContainerInitializer config to the
         // context
+        /**
+         * 将ServletContainerInitializer扫描结果添加到StandardContext，以便StandardContext启动时使用。
+         */
         if (ok) {
             for (Map.Entry<ServletContainerInitializer,
                     Set<Class<?>>> entry :
@@ -1605,6 +1776,12 @@ public class ContextConfig implements LifecycleListener {
 
     /**
      * Scan JARs for ServletContainerInitializer implementations.
+     * <p>
+     *     通过扫描配置文件，扫描实现了ServletContainerInitializer接口的servlet类
+     *     这里很重要，因为springboot、springmvc在内嵌tomcat的时候，会通过SpringServletContainerInitializer（这个
+     *     实现了ServletContainerInitializer）来调用实现了WebApplicationInitializer接口的类的onStartup方法，从而启动了
+     *     jar包和war包。
+     * </p>
      */
     protected void processServletContainerInitializers() {
 

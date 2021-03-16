@@ -68,6 +68,13 @@ import org.apache.tomcat.util.modeler.Util;
  *
  * @author Craig R. McClanahan
  * @author Remy Maucherat
+ * <p>
+ *     StandardWrapper维护了具体的Servlet是，而在StandardContext启动过程中，
+ *     StandardWrapper处理分为两个部分。
+ *     1. 首先，通过ContextConfig完成Web容器初始化后，先调用了StandardWrapper.start,此时
+ *       StandardWrapper组件的状态变为STARTED（除了广播启动通知外，不进行其他处理）。
+ *     2. 其次，对应启动时加载的Servlet(load-on-startup>=0),调用StandardWrapper.load,完成Servlet的加载。
+ * </p>
  */
 @SuppressWarnings("deprecation") // SingleThreadModel
 public class StandardWrapper extends ContainerBase
@@ -977,6 +984,13 @@ public class StandardWrapper extends ContainerBase
      * @exception ServletException if the servlet init() method threw
      *  an exception
      * @exception ServletException if some other loading problem occurs
+     * <p>
+     *     1. 创建Servlet实例，如果添加了JNDI资源注解，将进行依赖注入。
+     *     2. 读取javax.servlet.annotation.MultipartConfig注解配置，以用于multipart/form-data请求处理，
+     *        包括临时文件存储路径、上上传文件最大字节数、请求最大字节数、文件大小阀值。
+     *     3. 读取javax.servlet.annotation.ServletSecurity()注解配置，添加Servlet安全。
+     *     4. 调用javax.servlet.Servlet.init()方法进行Servlet初始化。
+     * </p>
      */
     @Override
     public synchronized void load() throws ServletException {
