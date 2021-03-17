@@ -30,19 +30,19 @@ import org.apache.tomcat.util.buf.MessageBytes;
  */
 public class MappingData {
 
-    public Host host = null;
-    public Context context = null;
-    public int contextSlashCount = 0;
-    public Context[] contexts = null;
-    public Wrapper wrapper = null;
-    public boolean jspWildCard = false;
+    public Host host = null; // 匹配的Host
+    public Context context = null; // 匹配的Context
+    public int contextSlashCount = 0; // Context路径当中"/"的数量
+    public Context[] contexts = null; // 匹配的Context列表，只用于匹配过程，并非最终使用结果
+    public Wrapper wrapper = null; // 匹配的wrapper
+    public boolean jspWildCard = false; // 对应JspServlet，其对应的匹配pattern是否包含通配符
 
-    public final MessageBytes contextPath = MessageBytes.newInstance();
-    public final MessageBytes requestPath = MessageBytes.newInstance();
-    public final MessageBytes wrapperPath = MessageBytes.newInstance();
-    public final MessageBytes pathInfo = MessageBytes.newInstance();
+    public final MessageBytes contextPath = MessageBytes.newInstance(); //Context路径
+    public final MessageBytes requestPath = MessageBytes.newInstance(); // 相对于Context的请求路径
+    public final MessageBytes wrapperPath = MessageBytes.newInstance(); // Servlet路径
+    public final MessageBytes pathInfo = MessageBytes.newInstance(); // 相对于Servlet的请求路径
 
-    public final MessageBytes redirectPath = MessageBytes.newInstance();
+    public final MessageBytes redirectPath = MessageBytes.newInstance(); // 重定向路径
 
     // Fields used by ApplicationMapping to implement javax.servlet.http.Mapping
     public MappingMatch matchType = MappingMatch.UNKNOWN;
