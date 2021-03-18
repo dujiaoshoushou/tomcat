@@ -60,6 +60,11 @@ import org.apache.tomcat.util.res.StringManager;
  *
  * @author Craig R. McClanahan
  * @author Remy Maucherat
+ * <p>
+ *     请求映射过程具体分为两个部分，一部分位于CoyoteAdapter.postParseRequest,负责根据请求路径匹配的结果，
+ *     按照会话等信息获取最终的结果（因为只根据请求路径的匹配，结果可能为多个）。
+ *     第二部分位于Mapper.map，负责完成具体的请求路径的匹配。
+ * </p>
  */
 public class CoyoteAdapter implements Adapter {
 
@@ -294,7 +299,26 @@ public class CoyoteAdapter implements Adapter {
         return success;
     }
 
-
+    /**
+     * (1) 根据Connector的请求（org.apache.coyote.Request)和响应（org.apache.coyote.Response)
+     *     对象创建Servlet请求（org.apache.catalina.connector.Request）和 响应（org.apache.catalina.connector.Response）.
+     * (2) 转换请求参数并完成请求映射。
+     *     - 请求URI解码，初始化请求的路径参数。
+     *     - 检测URI是否合法，如果非法，则返回响应码400.
+     *     - 请求映射，映射结果保存到org.apache.catalina.connector.Reauest.mappingData,类型为org.apache.tomcat.util.http.mapper.MappingData,
+     *       请求映射处理最终会根据URI定位到一个有效的Wrapper
+     *     - 如果映射结果MappingData的redirectPath属性不为空（即为重定向请求），则调用org.apache.catalina.connector.Response.sendRedirect
+     *       发送重定向并结束。
+     *     - 如果当前Connector不允许追踪（allowTrace为false) 且当前请求的Method为TRACE，则返回响应码405
+     *     - 执行连接器的认证及授权。
+     * (3) 得到当前Engine的第一个Valve并执行（invoke),已完成客户端的请求处理。
+     * (4) 如果为异步请求：
+     *     - 获得请求读取事件监听器（ReadListener);
+     *     - 如果请求读取已经结束，触发ReadListener.onAllDataRead.
+     * (5) 如果为同步请求：
+     *     - Flush并关闭请求输入流
+     *     - Flush并关闭响应输出流。
+     */
     @Override
     public void service(org.apache.coyote.Request req, org.apache.coyote.Response res)
             throws Exception {
@@ -539,6 +563,13 @@ public class CoyoteAdapter implements Adapter {
      *                     processing headers
      * @throws ServletException If the supported methods of the target servlet
      *                          cannot be determined
+     * <p>
+     *     Tomcat确保得到Context符合如下要求：
+     *     - 匹配请求路径。
+     *     - 如果有有效会话，则为包含会话的最新版本。
+     *     - 如果没有有效会话，则为所有匹配请求的最新版本。
+     *     - Context必须是有效的（非暂停状态）。
+     * </p>
      */
     protected boolean postParseRequest(org.apache.coyote.Request req, Request request,
             org.apache.coyote.Response res, Response response) throws IOException, ServletException {
@@ -670,17 +701,34 @@ public class CoyoteAdapter implements Adapter {
 
         // Version for the second mapping loop and
         // Context that we expect to get for that version
+        /**
+         * 1. 定义3个局部变量。
+         * version：需要匹配的版本号，初始化位空，也就是匹配所有的版本。
+         * versionContext：用于暂存按照会话ID匹配的Context，初始化为空。
+         * mapRequired：是否需要映射，用于控制映射匹配循环，初始化位true。
+         */
         String version = null;
         Context versionContext = null;
         boolean mapRequired = true;
-
+        /**
+         * 2. 通过一个循环（mapRequired==true）来处理映射匹配，因为只通过一次处理并不能确保
+         *    得到正确结果（第（3）步至第（8）步均为循环内部处理）。
+         */
         while (mapRequired) {
             // This will map the the latest version by default
+            /**
+             * 3. 在循环第一步，调用Mapper.map()方法按照请求路径进行匹配，参数为serverName、url、version.
+             *    因为version初始化时为空，所以第一次执行时，所有匹配该请求路径Context均会返回，此时MappingData.contexts
+             *    中存放了所有结果，而MappingData.context中存放了最新版本。
+             */
             connector.getService().getMapper().map(serverName, decodedURI,
                     version, request.getMappingData());
 
             // If there is no context at this point, it is likely no ROOT context
             // has been deployed
+            /**
+             * 4. 如果没有任何匹配结果，那么返回404响应码，匹配结束。
+             */
             if (request.getContext() == null) {
                 res.setStatus(404);
                 res.setMessage("Not found");
@@ -696,6 +744,10 @@ public class CoyoteAdapter implements Adapter {
             // Now we have the context, we can parse the session ID from the URL
             // (if any). Need to do this before we redirect in case we need to
             // include the session id in the redirect
+            /**
+             * 5. 参数从请求的URL，Cookie，SSL会话获取请求会话的ID，并将mapRequired设置为false
+             * （当第3步，执行成功后，默认不再执行循环，是否需要重新执行由后续步骤确定）。
+             */
             String sessionID;
             if (request.getServletContext().getEffectiveSessionTrackingModes()
                     .contains(SessionTrackingMode.URL)) {
@@ -717,9 +769,23 @@ public class CoyoteAdapter implements Adapter {
             sessionID = request.getRequestedSessionId();
 
             mapRequired = false;
+            /**
+             * 6. 如果version不为空，且MappingData.context与versionContext相等，即表明当前匹配结果是会话结果，
+             * 此时不在执行第7步。当前步骤仅用于重复匹配，第一次执行时，version和versionContext均为空，所以需要继续执行
+             * 第7步，而重复执行时，已经指定了版本，可得到唯一的匹配结果。
+             */
             if (version != null && request.getContext() == versionContext) {
                 // We got the version that we asked for. That is it.
             } else {
+                /**
+                 * 7. 如果不存在会话ID，那么第3步匹配结果即为最终结果（即使用匹配的最新版本）。
+                 *    否则，从MappingData.contexts中查找包含请求会话ID的最新版本，查询结果分如下情况。
+                 *    - 没有查询几个（即表明会话ID过期）或者查询结果与第3步匹配结果相等，这时同样是用的事第3步匹配结果。
+                 *    - 有查询结果且月第3步匹配结果不相等（表明当前会话使用的不是最新版本），将version设置为查询结果的版本，
+                 *    versionContext设置为查询结果，将mapRequired设置为true，重置MappingData。此种情况下，需要重复执行第3步
+                 *    （之所以需要重复执行，是因为虽然通话会话ID查询到了合适的Context，但是MappingData中记录的Wrapper以及相关的路径
+                 *    信息仍属于最新版本Context，是错误的），并明确指定匹配版本。指定版本后，第3步应只存唯一的匹配结果。
+                 */
                 version = null;
                 versionContext = null;
 
@@ -752,7 +818,11 @@ public class CoyoteAdapter implements Adapter {
                     }
                 }
             }
-
+            /**
+             * 8. 如果mapRequired为false（即已找到唯一的匹配结果），但匹配的Context状态为暂停
+             * （如果正在重新加载），此时等待1秒钟，并将mapRequired设置为true，重置MappingData.
+             * 此种情况下，需要进行重新匹配，直到匹配到一个有效的Context或者无任何匹配结果为止。
+             */
             if (!mapRequired && request.getContext().getPaused()) {
                 // Found a matching context but it is paused. Mapping data will
                 // be wrong since some Wrappers may not be registered at this

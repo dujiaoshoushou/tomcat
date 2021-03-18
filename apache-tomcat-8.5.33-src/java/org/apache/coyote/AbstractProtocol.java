@@ -675,6 +675,20 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler,
 
     // ------------------------------------------- Connection handler base class
 
+    /**
+     *
+     * ConnectionHandler是AbstractProtoco的一个内部类，主要用于为链接选择一个合适的Processor实现以进行请求处理。
+     *    为了提升性能，它针对每个有效的链接都会缓存其Processor对象。不仅如此，当前链接关闭时，
+     *    其Processor对象还会别释放到一个回收队列（升级协议不回收），这样后续链接可以重置并重复利用，以减少对象构造。
+     *    因此，在处理请求时，它首先会从缓存中获取当前链接的Processor对象。
+     *    如果不存在，则尝试根据协商协议构造Processor（如HTTP/2.0）。
+     *    如果不存协商协议（如HTTP/1.1请求）则从回收队列中获取一个以释放Processor对象使用。
+     *    如果回收队列中没有可用的对象，那么由具体的协议创建一个Processor使用（同时注册到缓存）。
+     *    然后，ConnectionHandler调用Porcessor.process()方法进行请求处理。
+     *    如果不是协商协议的请求（如普通的HTTP/1.1请求或者AJP请求），
+     *    那么Processor会直接调用CoyoteAdapter.service()方法将其体积到Catalina容器处理。
+     *    如果是协议协商请求，Processor会返回SocketState.UPGRADING，由ConnectionHandler进行协议升级。
+     */
     protected static class ConnectionHandler<S> implements AbstractEndpoint.Handler<S> {
 
         private final AbstractProtocol<S> proto;
@@ -804,7 +818,12 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler,
                 SocketState state = SocketState.CLOSED;
                 do {
                     state = processor.process(wrapper, status);
-
+                    /**
+                     * 协议升级时，ConnectionHandler会从当前Processor得到一个UpgradeToken对象（如不没有，默认为 HTTP/2），
+                     * 并构造一个升级Processor实例（如果是Tomcat支持的协议（如HTTP/2和WebSocket）则会是UpgradeProcessorInternal，
+                     * 否是UpgradeProcessorExternal）替换当前的Processor，
+                     * 并将当前的Processor释放回收。替换后，该链接的后续处理将由升级Processor完成。
+                     */
                     if (state == SocketState.UPGRADING) {
                         // Get the HTTP upgrade handler
                         UpgradeToken upgradeToken = processor.getUpgradeToken();
@@ -853,6 +872,9 @@ public abstract class AbstractProtocol<S> implements ProtocolHandler,
                             } else {
                                 ClassLoader oldCL = upgradeToken.getContextBind().bind(false, null);
                                 try {
+                                    /**
+                                     * 通过UpgradeToken中的HttpUpgradeHandler对象的init()方法进行初始化，以便准备开始启用新协议。
+                                     */
                                     httpUpgradeHandler.init((WebConnection) processor);
                                 } finally {
                                     upgradeToken.getContextBind().unbind(false, oldCL);

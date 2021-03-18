@@ -322,7 +322,10 @@ public class CoyoteAdapter implements Adapter {
     @Override
     public void service(org.apache.coyote.Request req, org.apache.coyote.Response res)
             throws Exception {
-
+        /**
+         * 根据Connector的请求（org.apache.coyote.Request)和响应（org.apache.coyote.Response)
+         *     对象创建Servlet请求（org.apache.catalina.connector.Request）和 响应（org.apache.catalina.connector.Response）.
+         */
         Request request = (Request) req.getNote(ADAPTER_NOTES);
         Response response = (Response) res.getNote(ADAPTER_NOTES);
 
@@ -357,8 +360,22 @@ public class CoyoteAdapter implements Adapter {
         try {
             // Parse and set Catalina and configuration specific
             // request parameters
+            /**
+             * (2) 转换请求参数并完成请求映射。
+             *     - 请求URI解码，初始化请求的路径参数。
+             *     - 检测URI是否合法，如果非法，则返回响应码400.
+             *     - 请求映射，映射结果保存到org.apache.catalina.connector.Reauest.mappingData,类型为org.apache.tomcat.util.http.mapper.MappingData,
+             *       请求映射处理最终会根据URI定位到一个有效的Wrapper
+             *     - 如果映射结果MappingData的redirectPath属性不为空（即为重定向请求），则调用org.apache.catalina.connector.Response.sendRedirect
+             *       发送重定向并结束。
+             *     - 如果当前Connector不允许追踪（allowTrace为false) 且当前请求的Method为TRACE，则返回响应码405
+             *     - 执行连接器的认证及授权。
+             */
             postParseSuccess = postParseRequest(req, request, res, response);
             if (postParseSuccess) {
+                /**
+                 * （3）得到当前Engine的第一个Valve并执行（invoke),已完成客户端的请求处理。
+                 */
                 //check valves if we support async
                 request.setAsyncSupported(
                         connector.getService().getContainer().getPipeline().isAsyncSupported());
@@ -366,6 +383,11 @@ public class CoyoteAdapter implements Adapter {
                 connector.getService().getContainer().getPipeline().getFirst().invoke(
                         request, response);
             }
+            /**
+             * (4) 如果为异步请求：
+             *     - 获得请求读取事件监听器（ReadListener);
+             *     - 如果请求读取已经结束，触发ReadListener.onAllDataRead.
+             */
             if (request.isAsync()) {
                 async = true;
                 ReadListener readListener = req.getReadListener();
@@ -393,6 +415,11 @@ public class CoyoteAdapter implements Adapter {
                     request.getAsyncContextInternal().setErrorState(throwable, true);
                 }
             } else {
+                /**
+                 * (5) 如果为同步请求：
+                 *     - Flush并关闭请求输入流
+                 *     - Flush并关闭响应输出流。
+                 */
                 request.finishRequest();
                 response.finishResponse();
             }
